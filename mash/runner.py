@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .config import settings
-from .db import db
+from .db import db, get_config
 from .mailbridge_client import MailbridgeClient
 from .runtime_config import runtime_config
 from .scripts import get_script, parse_script
@@ -83,6 +83,7 @@ FORWARD_ATTACHMENT_ACTIONS = {
     "forward_matching_attachments",
 }
 FORWARD_ACTIONS = FORWARD_DRAFT_ACTIONS | FORWARD_ATTACHMENT_ACTIONS
+REPORT_ACTIONS = {"send_report"}
 
 
 def _resolve_account_id(mailbridge: MailbridgeClient, account_name: str) -> int:
@@ -146,6 +147,254 @@ def _dedupe_attachments(attachments: list[dict[str, Any]]) -> list[dict[str, Any
         seen.add(key)
         result.append(item)
     return result
+
+
+def _resolve_report_recipient(action: dict[str, Any]) -> str:
+    recipient = str(action.get("to") or action.get("to_recipients") or "").strip()
+    if recipient == "owner":
+        recipient = get_config("default_report_recipient", "owner").strip()
+    if not recipient or recipient == "owner":
+        raise ValueError("report recipient is not configured; set a concrete recipient or initialize default_report_recipient")
+    return recipient
+
+
+def _resolve_report_account(
+    mailbridge: MailbridgeClient,
+    action: dict[str, Any],
+    default_account_name: str,
+    default_account_id: int,
+) -> tuple[str, int]:
+    account_name = str(action.get("send_account") or action.get("from_account") or default_account_name).strip()
+    if not account_name:
+        return default_account_name, default_account_id
+    if account_name == default_account_name:
+        return default_account_name, default_account_id
+    return account_name, _resolve_account_id(mailbridge, account_name)
+
+
+def _message_date_key(message: dict[str, Any]) -> str:
+    sent_at = str(message.get("sent_at") or "")
+    if not sent_at:
+        return "unknown"
+    try:
+        return datetime.fromisoformat(sent_at.replace("Z", "+00:00")).astimezone(ZoneInfo(settings.timezone)).date().isoformat()
+    except Exception:
+        return sent_at[:10] or "unknown"
+
+
+def _recent_runs_for_report(window_hours: int, limit: int, *, exclude_run_id: int = 0) -> list[dict[str, Any]]:
+    safe_window = max(1, min(int(window_hours), 24 * 90))
+    safe_limit = max(1, min(int(limit), 500))
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT r.*, s.name AS script_name, s.enabled AS script_enabled, s.schedule AS script_schedule, s.account AS script_account
+            FROM runs r
+            LEFT JOIN scripts s ON s.id = r.script_id
+            WHERE r.id != ? AND r.started_at >= datetime('now', ?)
+            ORDER BY r.id DESC
+            LIMIT ?
+            """,
+            (exclude_run_id, f"-{safe_window} hours", safe_limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _run_log_events(run: dict[str, Any]) -> list[dict[str, Any]]:
+    path = Path(str(run.get("log_path") or ""))
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            events.append(item)
+    return events
+
+
+def _run_highlights(run: dict[str, Any]) -> list[str]:
+    highlights = []
+    for event in _run_log_events(run):
+        name = str(event.get("event") or "")
+        action_type = str(event.get("action_type") or "")
+        if name == "mail_search":
+            highlights.append(f"search matched {event.get('matched', 0)} for `{event.get('query', '')}`")
+        elif name == "no_matches_sleep":
+            highlights.append("no matching messages; slept until next schedule")
+        elif name == "action_executed":
+            if action_type == "move":
+                highlights.append(f"moved/handled messages: {event.get('result', '')}")
+            elif action_type in FORWARD_ACTIONS:
+                highlights.append(
+                    f"created {event.get('created', 0)} forward draft(s), "
+                    f"matched attachments {event.get('matched_attachments', 0)}"
+                )
+            elif action_type in CALENDAR_ACTIONS:
+                highlights.append(f"created {event.get('created', 0)} calendar event(s), skipped {event.get('skipped', 0)}")
+            else:
+                highlights.append(f"executed {action_type or 'action'}")
+        elif name == "report_draft_created":
+            highlights.append(f"created report draft #{event.get('draft_id')} to {event.get('to', '')}")
+        elif name == "would_forward_attachments":
+            selected = []
+            for message in event.get("selected_messages") or []:
+                if isinstance(message, dict):
+                    selected.extend(str(item) for item in message.get("selected_attachments") or [])
+            if selected:
+                highlights.append("would forward attachments: " + ", ".join(selected[:5]))
+        elif name == "script_not_validated":
+            highlights.append("blocked: script validation required")
+        elif name == "run_failed":
+            highlights.append(f"failed: {event.get('error', '')}")
+    return highlights[:4]
+
+
+def _build_job_overview_report(data: dict[str, Any], *, current_run_id: int = 0) -> str:
+    now_local = datetime.now(ZoneInfo(settings.timezone)).replace(microsecond=0)
+    send_actions = [action for action in data.get("actions", []) if isinstance(action, dict) and str(action.get("type", "")) == "send_report"]
+    options = send_actions[0] if send_actions else {}
+    window_hours = int(options.get("window_hours") or options.get("hours") or 24)
+    limit = int(options.get("max_runs") or 100)
+    runs = _recent_runs_for_report(window_hours, limit, exclude_run_id=current_run_id)
+
+    status_counts: dict[str, int] = {}
+    totals = {"matched": 0, "actions": 0, "skipped": 0}
+    by_script: dict[str, dict[str, Any]] = {}
+    for run in runs:
+        status = str(run.get("status") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        totals["matched"] += int(run.get("matched_count") or 0)
+        totals["actions"] += int(run.get("action_count") or 0)
+        totals["skipped"] += int(run.get("skipped_count") or 0)
+        script_id = str(run.get("script_id") or "")
+        item = by_script.setdefault(
+            script_id,
+            {
+                "name": str(run.get("script_name") or script_id),
+                "runs": 0,
+                "ok": 0,
+                "blocked": 0,
+                "error": 0,
+                "matched": 0,
+                "actions": 0,
+                "skipped": 0,
+                "last_status": status,
+                "last_run_id": run.get("id"),
+                "last_started": run.get("started_at"),
+                "highlights": [],
+            },
+        )
+        item["runs"] += 1
+        item["matched"] += int(run.get("matched_count") or 0)
+        item["actions"] += int(run.get("action_count") or 0)
+        item["skipped"] += int(run.get("skipped_count") or 0)
+        if status in {"ok", "blocked", "error"}:
+            item[status] += 1
+        if int(run.get("id") or 0) >= int(item.get("last_run_id") or 0):
+            item["last_status"] = status
+            item["last_run_id"] = run.get("id")
+            item["last_started"] = run.get("started_at")
+        for highlight in _run_highlights(run):
+            if highlight not in item["highlights"]:
+                item["highlights"].append(highlight)
+
+    lines = [
+        "MCP-MASH Job Overview",
+        "",
+        f"Generated: {now_local.isoformat()}",
+        f"Window: last {window_hours} hour(s)",
+        f"Runs inspected: {len(runs)}",
+        "",
+        "Summary:",
+        f"- OK: {status_counts.get('ok', 0)}",
+        f"- Blocked: {status_counts.get('blocked', 0)}",
+        f"- Errors: {status_counts.get('error', 0)}",
+        f"- Running/other: {len(runs) - status_counts.get('ok', 0) - status_counts.get('blocked', 0) - status_counts.get('error', 0)}",
+        f"- Total matched messages: {totals['matched']}",
+        f"- Total actions: {totals['actions']}",
+        f"- Total skipped: {totals['skipped']}",
+        "",
+        "Jobs:",
+    ]
+    if not by_script:
+        lines.append("- No MASH runs in this window.")
+    for script_id, item in sorted(by_script.items(), key=lambda pair: str(pair[1].get("last_started") or ""), reverse=True):
+        lines.extend(
+            [
+                f"- {item['name']} (`{script_id}`)",
+                f"  Runs: {item['runs']} | OK: {item['ok']} | Blocked: {item['blocked']} | Errors: {item['error']}",
+                f"  Processed: matched {item['matched']}, actions {item['actions']}, skipped {item['skipped']}",
+                f"  Last: run #{item['last_run_id']} at {item['last_started']} ({item['last_status']})",
+            ]
+        )
+        for highlight in item["highlights"][:3]:
+            lines.append(f"  - {highlight}")
+
+    lines.extend(["", "Generated by MCP-MASH."])
+    return "\n".join(lines)
+
+
+def _build_mail_report(data: dict[str, Any], matches: list[dict[str, Any]], account_name: str, query: str) -> str:
+    now_local = datetime.now(ZoneInfo(settings.timezone)).replace(microsecond=0)
+    send_actions = [action for action in data.get("actions", []) if isinstance(action, dict) and str(action.get("type", "")) == "send_report"]
+    options = send_actions[0] if send_actions else {}
+    max_examples = max(0, min(int(options.get("max_examples") or 10), 50))
+    include_examples = bool(options.get("include_examples", True))
+
+    by_sender: dict[str, int] = {}
+    by_day: dict[str, int] = {}
+    unread = 0
+    attachment_messages = 0
+    for message in matches:
+        sender = str(message.get("sender") or "(unknown sender)")
+        by_sender[sender] = by_sender.get(sender, 0) + 1
+        day = _message_date_key(message)
+        by_day[day] = by_day.get(day, 0) + 1
+        flags = str(message.get("flags") or "").lower()
+        if "\\seen" not in flags and "seen" not in flags:
+            unread += 1
+        if str(message.get("attachment_names") or ""):
+            attachment_messages += 1
+
+    lines = [
+        "MCP-MASH Mail Report",
+        "",
+        f"Generated: {now_local.isoformat()}",
+        f"Script: {data.get('id', '')} - {data.get('name', '')}",
+        f"Account: {account_name}",
+        f"Query: {query}",
+        f"Matched messages: {len(matches)}",
+        f"Unread/unknown-unread messages: {unread}",
+        f"Messages with indexed attachments: {attachment_messages}",
+        "",
+        "Top senders:",
+    ]
+    if by_sender:
+        for sender, count in sorted(by_sender.items(), key=lambda item: (-item[1], item[0].lower()))[:10]:
+            lines.append(f"- {count} x {sender}")
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "Messages by day:"])
+    if by_day:
+        for day, count in sorted(by_day.items(), reverse=True)[:14]:
+            lines.append(f"- {day}: {count}")
+    else:
+        lines.append("- none")
+
+    if include_examples and max_examples:
+        lines.extend(["", "Examples:"])
+        for message in matches[:max_examples]:
+            lines.append(
+                f"- #{message.get('id')} | {message.get('sent_at') or ''} | "
+                f"{message.get('sender') or ''} | {message.get('subject') or ''}"
+            )
+
+    lines.extend(["", "Generated by MCP-MASH through Mailbridge."])
+    return "\n".join(lines)
 
 
 def _parse_delivery_window(message: dict[str, Any]) -> tuple[str, str] | None:
@@ -272,6 +521,43 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
         for index, action in enumerate(actions):
             action_type = str(action.get("type", ""))
             action_count += 1
+            if action_type == "summarize":
+                report_body = _build_job_overview_report(data, current_run_id=run_id)
+                _write_log(
+                    log_path,
+                    "info",
+                    "summary_created" if not dry_run else "would_create_summary",
+                    index=index,
+                    action_type=action_type,
+                    matched=matched_count,
+                    report_preview=report_body[:4000],
+                )
+                continue
+            if dry_run and mailbridge and action_type in REPORT_ACTIONS:
+                recipient = _resolve_report_recipient(action)
+                report_account_name, report_account_id = _resolve_report_account(mailbridge, action, account_name, account_id)
+                subject = str(action.get("subject") or "MCP-MASH mail report")
+                report_body = _build_job_overview_report(data, current_run_id=run_id)
+                _write_log(
+                    log_path,
+                    "info",
+                    "would_create_report_draft",
+                    index=index,
+                    action_type=action_type,
+                    account=account_name,
+                    account_id=account_id,
+                    send_account=report_account_name,
+                    send_account_id=report_account_id,
+                    to=recipient,
+                    cc=str(action.get("cc") or action.get("cc_recipients") or ""),
+                    bcc=str(action.get("bcc") or action.get("bcc_recipients") or ""),
+                    subject=subject,
+                    matched=matched_count,
+                    body_preview=report_body[:4000],
+                    send_requested=bool(action.get("send", True)),
+                    automation_consent_id=action.get("automation_consent_id"),
+                )
+                continue
             if dry_run and mailbridge and action_type in FORWARD_ATTACHMENT_ACTIONS:
                 selected_messages = []
                 skipped = 0
@@ -339,6 +625,40 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     source_folder=str(action.get("source_folder", "")),
                 )
                 _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, result=str(result)[:2000])
+            elif action_type in REPORT_ACTIONS:
+                recipient = _resolve_report_recipient(action)
+                report_account_name, report_account_id = _resolve_report_account(mailbridge, action, account_name, account_id)
+                subject = str(action.get("subject") or "MCP-MASH mail report")
+                report_body = _build_job_overview_report(data, current_run_id=run_id)
+                draft = mailbridge.create_draft(
+                    report_account_id,
+                    recipient,
+                    subject,
+                    report_body,
+                    cc_recipients=str(action.get("cc") or action.get("cc_recipients") or ""),
+                    bcc_recipients=str(action.get("bcc") or action.get("bcc_recipients") or ""),
+                )
+                send_result: dict[str, Any] | None = None
+                if bool(action.get("send", True)):
+                    consent = action.get("automation_consent_id")
+                    send_result = mailbridge.send_draft(
+                        int(draft["id"]),
+                        automation_consent_id=int(consent) if consent not in {None, ""} else None,
+                    )
+                _write_log(
+                    log_path,
+                    "info",
+                    "report_draft_created",
+                    index=index,
+                    action_type=action_type,
+                    draft_id=int(draft["id"]),
+                    send_account=report_account_name,
+                    send_account_id=report_account_id,
+                    to=recipient,
+                    subject=subject,
+                    matched=matched_count,
+                    send_result=str(send_result or {"send_requested": False})[:2000],
+                )
             elif action_type in CALENDAR_ACTIONS:
                 target_account = str(action.get("target_account") or action.get("calendar_account") or "").strip()
                 target_account_id = _resolve_account_id(mailbridge, target_account)

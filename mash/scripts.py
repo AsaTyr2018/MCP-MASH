@@ -145,6 +145,10 @@ def validate_script_content(content: str) -> dict[str, Any]:
                     errors.append(f"action {index} {action_type} requires starts_at")
             if action_type in {"send_reply", "send_report"} and action.get("mode") != "via_mailbridge_policy":
                 errors.append(f"action {index} {action_type} requires mode=via_mailbridge_policy")
+            if action_type == "send_report":
+                send_account = str(action.get("send_account") or action.get("from_account") or "").strip()
+                if send_account and send_account not in allowed_accounts():
+                    errors.append(f"action {index} send_account '{send_account}' is not in the MASH allowlist")
     if errors:
         raise ValueError("; ".join(errors))
     return data

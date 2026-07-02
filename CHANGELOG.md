@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- Change report rendering from mail-content summaries to MASH job overview reports.
+- Add report run-history summaries with status counts, processed counts, and job highlights.
+- Add `send_account` / `from_account` support so reports can read one account and send through another allowed account.
+- Add `automation_consent_id` support for report sends through Mailbridge approved automation policy.
+
 ## 0.1.6
 
 - Add real `test_mail_query` execution through Mailbridge.

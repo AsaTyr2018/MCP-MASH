@@ -44,8 +44,10 @@ Public internet exposure is not recommended yet.
 - Message read, attachment list/read, forward-draft helpers, and attachment-forwarding script actions through Mailbridge.
 - Real mail query previews through `test_mail_query`.
 - Dry-run logs for attachment forwarding include selected message IDs, subjects, senders, and attachment filenames.
-- Weekly report script generator.
-- Placeholder tools for future report/send work.
+- Weekly MASH job overview report generator.
+- Report dry-runs with job status, processed counts, and run-log highlights.
+- Report draft/send support through Mailbridge policy, including `send_account` and `automation_consent_id`.
+- Placeholder tools for future reply/send actions.
 
 ## Non-Goals
 
@@ -229,6 +231,8 @@ Current real execution support:
 - `read_attachment`
 - `create_forward_draft`, `forward_draft`, `forward`, `forward_mail`, `forward_email`, `forward_to`, `forward_message`, and `document_forward`
 - `forward_attachments`, `forward_pdf`, `send_attachments`, `extract_attachments`, `forward_message_with_attachments`, and `forward_matching_attachments`
+- `summarize` for deterministic MASH job overview previews
+- `send_report` for MASH job overview drafts and Mailbridge-policy sends
 
 Attachment-forwarding actions support:
 
@@ -240,15 +244,28 @@ Attachment-forwarding actions support:
 
 In dry runs, MASH does not create drafts. It inspects matching messages and writes a `would_forward_attachments` log entry with the selected attachment filenames. After the dry-run result is shown to the user and approved, `approve_script_validation` allows the script to create real Mailbridge forward drafts with copied attachments.
 
+Report actions generate a MASH job overview from recent run history. They do not summarize mailbox content. Use `send_account` or `from_account` to send from a different allowed Mailbridge account, and `automation_consent_id` to use a Mailbridge-approved automation send consent.
+
+Example:
+
+```yaml
+actions:
+  - type: send_report
+    to: hauke@example.com
+    send_account: botmail
+    subject: "Weekly MASH job overview"
+    mode: via_mailbridge_policy
+    window_hours: 168
+    automation_consent_id: 1
+```
+
 Current planned/placeholder actions:
 
-- `summarize`
 - `mark_read`
 - `mark_unread`
 - `trash`
 - `draft_reply`
 - `send_reply`
-- `send_report`
 - `add_label`
 - `remove_label`
 

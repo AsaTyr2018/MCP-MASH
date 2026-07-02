@@ -368,16 +368,17 @@ def create_weekly_report(
     script_id: str,
     account: str,
     recipient: str = "owner",
+    send_account: str = "",
     schedule: str = "0 8 * * MON",
     query: str = "newer_than:7d",
 ) -> dict[str, Any]:
     """Create a standard weekly mail report script."""
     content = {
         "id": script_id,
-        "name": "Weekly Mail Report",
+        "name": "Weekly MASH Job Overview",
         "enabled": True,
         "schedule": schedule,
-        "description": "Sends a weekly summary of relevant mail and automation state.",
+        "description": "Sends a weekly overview of MASH job runs, processed messages, actions, and errors.",
         "account": account,
         "query": query,
         "limits": {"max_messages": 200, "timeout_seconds": 120},
@@ -390,8 +391,10 @@ def create_weekly_report(
             {
                 "type": "send_report",
                 "to": recipient,
-                "subject": "Weekly mail report",
+                "subject": "Weekly MASH job overview",
                 "mode": "via_mailbridge_policy",
+                "send_account": send_account,
+                "window_hours": 168,
             },
         ],
         "logging": {"level": "detailed"},
@@ -401,13 +404,13 @@ def create_weekly_report(
 
 @mcp.tool()
 def send_report_now(script_id: str, dry_run: bool = True) -> dict[str, Any]:
-    """Run a report script immediately. Current basic build records planned report actions."""
+    """Run a report script immediately. Dry runs preview the report; real runs create a Mailbridge draft and obey Mailbridge send policy."""
     return run_script(script_id, dry_run=dry_run, reason="report_now")
 
 
 @mcp.tool()
 def preview_script(script_id: str) -> dict[str, Any]:
-    """Preview what a script would do. Current basic build returns a dry-run log."""
+    """Preview what a script would do by creating a dry-run log."""
     return run_script(script_id, dry_run=True, reason="preview")
 
 

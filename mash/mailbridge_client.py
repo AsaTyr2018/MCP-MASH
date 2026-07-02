@@ -139,6 +139,37 @@ class MailbridgeClient:
             args["profile_id"] = profile_id
         return _coerce_object(self.call("create_contact", args))
 
+    def create_draft(
+        self,
+        account_id: int,
+        to_recipients: str,
+        subject: str,
+        body_text: str,
+        cc_recipients: str = "",
+        bcc_recipients: str = "",
+        in_reply_to_message_id: int | None = None,
+    ) -> dict[str, Any]:
+        return _coerce_object(
+            self.call(
+                "create_draft",
+                {
+                    "account_id": account_id,
+                    "to_recipients": to_recipients,
+                    "subject": subject,
+                    "body_text": body_text,
+                    "cc_recipients": cc_recipients,
+                    "bcc_recipients": bcc_recipients,
+                    "in_reply_to_message_id": in_reply_to_message_id,
+                },
+            )
+        )
+
+    def send_draft(self, draft_id: int, automation_consent_id: int | None = None) -> dict[str, Any]:
+        args: dict[str, Any] = {"draft_id": draft_id, "interactive_ok": False}
+        if automation_consent_id is not None:
+            args["automation_consent_id"] = automation_consent_id
+        return _coerce_object(self.call("send_draft", args))
+
     def create_forward_draft(
         self,
         message_id: int,
