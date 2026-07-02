@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- Treat empty Mailbridge search results as a successful no-op instead of a runner error.
+- Add `on_no_matches` validation with `sleep`, `skip`, and `ok` behaviors.
+- Harden Mailbridge MCP response parsing for empty or `{ "result": [] }` responses.
+
 ## 0.1.0
 
 - Initial Dockerized MCP-MASH release.

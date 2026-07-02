@@ -70,10 +70,7 @@ class MailbridgeClient:
 
     def list_accounts(self) -> list[dict[str, Any]]:
         raw = self.call("list_accounts", {})
-        if isinstance(raw, list):
-            return [json.loads(item) if isinstance(item, str) else item for item in raw]
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, list) else [parsed]
+        return _coerce_records(raw)
 
     def account_id_by_name(self, name: str) -> int:
         accounts = self.list_accounts()
@@ -87,10 +84,7 @@ class MailbridgeClient:
 
     def search_mail(self, account_id: int, query: str, limit: int = 20) -> list[dict[str, Any]]:
         raw = self.call("search_mail", {"account_id": account_id, "query": query, "limit": limit})
-        if isinstance(raw, list):
-            return [json.loads(item) if isinstance(item, str) else item for item in raw]
-        parsed = json.loads(raw)
-        return parsed if isinstance(parsed, list) else [parsed]
+        return _coerce_records(raw)
 
     def move_messages(self, account_id: int, message_ids: list[int], target_folder: str, source_folder: str = "") -> Any:
         return self.call(
@@ -102,3 +96,32 @@ class MailbridgeClient:
                 "source_folder": source_folder,
             },
         )
+
+
+def _coerce_records(raw: Any) -> list[dict[str, Any]]:
+    if raw is None or raw == "":
+        return []
+    if isinstance(raw, str):
+        parsed = json.loads(raw)
+    else:
+        parsed = raw
+    if isinstance(parsed, dict) and "result" in parsed:
+        parsed = parsed["result"]
+    if parsed is None:
+        return []
+    if isinstance(parsed, list):
+        records = parsed
+    else:
+        records = [parsed]
+    result: list[dict[str, Any]] = []
+    for item in records:
+        if isinstance(item, str):
+            item = json.loads(item)
+        if isinstance(item, dict) and "result" in item and len(item) == 1:
+            nested = item["result"]
+            if isinstance(nested, list):
+                result.extend(record for record in nested if isinstance(record, dict))
+                continue
+        if isinstance(item, dict):
+            result.append(item)
+    return result

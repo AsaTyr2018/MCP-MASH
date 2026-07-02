@@ -30,6 +30,30 @@ def _write_log(path: Path, level: str, event: str, **payload: Any) -> None:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
 
 
+def _finish_run(
+    run_id: int,
+    started: float,
+    status: str,
+    matched_count: int,
+    action_count: int,
+    skipped_count: int,
+    error_message: str,
+) -> dict[str, Any]:
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE runs
+            SET status = ?, finished_at = CURRENT_TIMESTAMP, duration_ms = ?,
+                matched_count = ?, action_count = ?, skipped_count = ?, error_message = ?
+            WHERE id = ?
+            """,
+            (status, duration_ms, matched_count, action_count, skipped_count, error_message, run_id),
+        )
+        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+    return dict(row)
+
+
 def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual") -> dict[str, Any]:
     script = get_script(script_id)
     data = parse_script(script["content"])
@@ -75,6 +99,20 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
             matches = mailbridge.search_mail(account_id, query, limit=max_messages)
             matched_count = len(matches)
             _write_log(log_path, "info", "mail_search", account=account_name, mailbridge_account=mailbridge_account_name, account_id=account_id, query=query, matched=matched_count)
+            if matched_count == 0:
+                no_match_behavior = str(data.get("on_no_matches", "sleep")).strip().lower() or "sleep"
+                _write_log(
+                    log_path,
+                    "info",
+                    "no_matches_sleep" if no_match_behavior == "sleep" else "no_matches",
+                    account=account_name,
+                    mailbridge_account=mailbridge_account_name,
+                    query=query,
+                    behavior=no_match_behavior,
+                    message="No matching messages found; run completed without actions.",
+                )
+                _write_log(log_path, "info", "run_finished", status=status, matched_count=matched_count, action_count=action_count, skipped_count=skipped_count)
+                return _finish_run(run_id, started, status, matched_count, action_count, skipped_count, error_message)
         actions = data.get("actions") if isinstance(data.get("actions"), list) else []
         for index, action in enumerate(actions):
             action_type = str(action.get("type", ""))
@@ -127,19 +165,7 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
         status = "error"
         error_message = str(exc)
         _write_log(log_path, "error", "run_failed", error=error_message)
-    duration_ms = int((time.perf_counter() - started) * 1000)
-    with db() as conn:
-        conn.execute(
-            """
-            UPDATE runs
-            SET status = ?, finished_at = CURRENT_TIMESTAMP, duration_ms = ?,
-                matched_count = ?, action_count = ?, skipped_count = ?, error_message = ?
-            WHERE id = ?
-            """,
-            (status, duration_ms, matched_count, action_count, skipped_count, error_message, run_id),
-        )
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
-    return dict(row)
+    return _finish_run(run_id, started, status, matched_count, action_count, skipped_count, error_message)
 
 
 def list_runs(limit: int = 20, script_id: str = "") -> list[dict[str, Any]]:

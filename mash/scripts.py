@@ -71,6 +71,9 @@ def validate_script_content(content: str) -> dict[str, Any]:
     schedule = str(data.get("schedule", "")).strip()
     if schedule and not croniter.is_valid(schedule):
         errors.append("schedule is not a valid cron expression")
+    on_no_matches = str(data.get("on_no_matches", "sleep")).strip().lower()
+    if on_no_matches and on_no_matches not in {"sleep", "skip", "ok"}:
+        errors.append("on_no_matches must be one of: sleep, skip, ok")
     actions = data.get("actions")
     if not isinstance(actions, list) or not actions:
         errors.append("actions must be a non-empty list")
