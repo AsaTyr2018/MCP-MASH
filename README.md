@@ -39,6 +39,7 @@ Public internet exposure is not recommended yet.
 - Account alias support, for example `botmail -> main`.
 - Real `move` execution through Mailbridge `move_messages`.
 - Contact and calendar list/search/create helpers through Mailbridge.
+- Calendar script actions for fixed events and mail-derived delivery windows.
 - Weekly report script generator.
 - Placeholder tools for future report/send/query-preview work.
 
@@ -193,6 +194,8 @@ logging:
 Current real execution support:
 
 - `move` through Mailbridge `move_messages`
+- `create_calendar_event` and aliases `calendar_event`, `calendar_create`, `create_event`
+- `calendar_from_delivery` and `create_calendar_events_from_mail` for mail-derived delivery events
 
 Current planned/placeholder actions:
 

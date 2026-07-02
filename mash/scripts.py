@@ -23,6 +23,20 @@ KNOWN_ACTIONS = {
     "send_report",
     "add_label",
     "remove_label",
+    "create_calendar_event",
+    "calendar_event",
+    "calendar_create",
+    "create_event",
+    "calendar_from_delivery",
+    "create_calendar_events_from_mail",
+}
+CALENDAR_ACTIONS = {
+    "create_calendar_event",
+    "calendar_event",
+    "calendar_create",
+    "create_event",
+    "calendar_from_delivery",
+    "create_calendar_events_from_mail",
 }
 
 
@@ -87,6 +101,14 @@ def validate_script_content(content: str) -> dict[str, Any]:
                 errors.append(f"action {index} has unknown type '{action_type}'")
             if action_type == "move" and not str(action.get("folder", "")).strip():
                 errors.append(f"action {index} move requires folder")
+            if action_type in CALENDAR_ACTIONS:
+                target_account = str(action.get("target_account") or action.get("calendar_account") or "").strip()
+                if not target_account:
+                    errors.append(f"action {index} {action_type} requires target_account")
+                elif target_account not in allowed_accounts():
+                    errors.append(f"action {index} target_account '{target_account}' is not in the MASH allowlist")
+                if action_type in {"create_calendar_event", "calendar_event", "calendar_create", "create_event"} and not str(action.get("starts_at", "")).strip():
+                    errors.append(f"action {index} {action_type} requires starts_at")
             if action_type in {"send_reply", "send_report"} and action.get("mode") != "via_mailbridge_policy":
                 errors.append(f"action {index} {action_type} requires mode=via_mailbridge_policy")
     if errors:

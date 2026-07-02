@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Add calendar script action validation and runner execution.
+- Add `calendar_from_delivery` support for Amazon-style delivery windows in mail snippets.
+- Add calendar action documentation and aliases for assistant-generated scripts.
+
 ## 0.1.2
 
 - Add MASH MCP tools for listing, searching, and creating contacts through Mailbridge.

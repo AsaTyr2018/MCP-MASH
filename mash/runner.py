@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .config import settings
 from .db import db
@@ -52,6 +54,85 @@ def _finish_run(
         )
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     return dict(row)
+
+
+CALENDAR_ACTIONS = {
+    "create_calendar_event",
+    "calendar_event",
+    "calendar_create",
+    "create_event",
+    "calendar_from_delivery",
+    "create_calendar_events_from_mail",
+}
+
+
+def _resolve_account_id(mailbridge: MailbridgeClient, account_name: str) -> int:
+    config_snapshot = runtime_config.snapshot()
+    mailbridge_account_name = (config_snapshot.account_aliases or {}).get(account_name, account_name)
+    return mailbridge.account_id_by_name(mailbridge_account_name)
+
+
+def _render_template(template: str, message: dict[str, Any]) -> str:
+    values = {
+        "subject": str(message.get("subject") or ""),
+        "sender": str(message.get("sender") or ""),
+        "sent_at": str(message.get("sent_at") or ""),
+        "folder": str(message.get("folder") or ""),
+        "message_id": str(message.get("id") or ""),
+    }
+    try:
+        return template.format(**values)
+    except Exception:
+        return template
+
+
+def _parse_delivery_window(message: dict[str, Any]) -> tuple[str, str] | None:
+    snippet = str(message.get("snippet") or "")
+    match = re.search(r"Zustellung\s+heute\s+([0-9]{1,2})(?::([0-9]{2}))?h?\s*-\s*([0-9]{1,2})(?::([0-9]{2}))?h?", snippet, re.IGNORECASE)
+    if not match:
+        return None
+    sent_at = str(message.get("sent_at") or "")
+    try:
+        base = datetime.fromisoformat(sent_at.replace("Z", "+00:00")).astimezone(ZoneInfo(settings.timezone))
+    except Exception:
+        base = datetime.now(ZoneInfo(settings.timezone))
+    start_hour = int(match.group(1))
+    start_minute = int(match.group(2) or "0")
+    end_hour = int(match.group(3))
+    end_minute = int(match.group(4) or "0")
+    start = base.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+    end = base.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+    if end <= start:
+        end += timedelta(hours=1)
+    return start.isoformat(), end.isoformat()
+
+
+def _calendar_event_payload(action: dict[str, Any], message: dict[str, Any]) -> dict[str, Any] | None:
+    action_type = str(action.get("type", ""))
+    starts_at = str(action.get("starts_at") or "").strip()
+    ends_at = str(action.get("ends_at") or "").strip()
+    if not starts_at and action_type in {"calendar_from_delivery", "create_calendar_events_from_mail"}:
+        window = _parse_delivery_window(message)
+        if window:
+            starts_at, ends_at = window
+    if not starts_at:
+        return None
+    subject = str(message.get("subject") or "")
+    title_template = str(action.get("title") or action.get("summary") or "Mail: {subject}")
+    description_template = str(
+        action.get("description")
+        or "Created by MCP-MASH from mail {message_id}.\n\nFrom: {sender}\nSubject: {subject}\nSent: {sent_at}"
+    )
+    return {
+        "title": _render_template(title_template, message),
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "location": _render_template(str(action.get("location") or ""), message),
+        "description": _render_template(description_template, message),
+        "attendees": str(action.get("attendees") or ""),
+        "profile_id": action.get("profile_id"),
+        "subject": subject,
+    }
 
 
 def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual") -> dict[str, Any]:
@@ -146,6 +227,42 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     source_folder=str(action.get("source_folder", "")),
                 )
                 _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, result=str(result)[:2000])
+            elif action_type in CALENDAR_ACTIONS:
+                target_account = str(action.get("target_account") or action.get("calendar_account") or "").strip()
+                target_account_id = _resolve_account_id(mailbridge, target_account)
+                created = 0
+                skipped = 0
+                results = []
+                for message in matches:
+                    payload = _calendar_event_payload(action, message)
+                    if not payload:
+                        skipped += 1
+                        continue
+                    result = mailbridge.create_calendar_event(
+                        target_account_id,
+                        payload["title"],
+                        payload["starts_at"],
+                        ends_at=payload["ends_at"],
+                        location=payload["location"],
+                        description=payload["description"],
+                        attendees=payload["attendees"],
+                        profile_id=int(payload["profile_id"]) if payload.get("profile_id") is not None else None,
+                    )
+                    created += 1
+                    results.append(result)
+                skipped_count += skipped
+                _write_log(
+                    log_path,
+                    "info",
+                    "action_executed",
+                    index=index,
+                    action_type=action_type,
+                    target_account=target_account,
+                    target_account_id=target_account_id,
+                    created=created,
+                    skipped=skipped,
+                    result=str(results[:5])[:2000],
+                )
             else:
                 event = "action_coming_soon"
                 skipped_count += 1
