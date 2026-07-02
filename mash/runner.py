@@ -64,6 +64,7 @@ CALENDAR_ACTIONS = {
     "calendar_from_delivery",
     "create_calendar_events_from_mail",
 }
+FORWARD_ACTIONS = {"create_forward_draft", "forward_draft", "forward"}
 
 
 def _resolve_account_id(mailbridge: MailbridgeClient, account_name: str) -> int:
@@ -262,6 +263,64 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     created=created,
                     skipped=skipped,
                     result=str(results[:5])[:2000],
+                )
+            elif action_type == "list_attachments":
+                inspected = []
+                for message in matches:
+                    inspected.append(mailbridge.list_attachments(int(message["id"])))
+                _write_log(
+                    log_path,
+                    "info",
+                    "action_executed",
+                    index=index,
+                    action_type=action_type,
+                    inspected=len(inspected),
+                    result=str(inspected[:10])[:2000],
+                )
+            elif action_type == "read_attachment":
+                inspected = []
+                max_bytes = max(1, min(int(action.get("max_bytes") or 250000), 5000000))
+                filename = str(action.get("filename") or "")
+                attachment_index = int(action.get("attachment_index") or 0)
+                for message in matches:
+                    result = mailbridge.get_attachment(int(message["id"]), attachment_index=attachment_index, filename=filename, max_bytes=max_bytes)
+                    redacted = dict(result)
+                    if "content_base64" in redacted:
+                        redacted["content_base64"] = f"<base64 {len(result['content_base64'])} chars>"
+                    inspected.append(redacted)
+                _write_log(
+                    log_path,
+                    "info",
+                    "action_executed",
+                    index=index,
+                    action_type=action_type,
+                    inspected=len(inspected),
+                    result=str(inspected[:10])[:2000],
+                )
+            elif action_type in FORWARD_ACTIONS:
+                to_recipients = str(action.get("to_recipients") or action.get("to") or "").strip()
+                note = str(action.get("note") or "")
+                cc_recipients = str(action.get("cc_recipients") or action.get("cc") or "")
+                bcc_recipients = str(action.get("bcc_recipients") or action.get("bcc") or "")
+                drafts = []
+                for message in matches:
+                    drafts.append(
+                        mailbridge.create_forward_draft(
+                            int(message["id"]),
+                            to_recipients,
+                            note=note,
+                            cc_recipients=cc_recipients,
+                            bcc_recipients=bcc_recipients,
+                        )
+                    )
+                _write_log(
+                    log_path,
+                    "info",
+                    "action_executed",
+                    index=index,
+                    action_type=action_type,
+                    created=len(drafts),
+                    result=str(drafts[:5])[:2000],
                 )
             else:
                 event = "action_coming_soon"

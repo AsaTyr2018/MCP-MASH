@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.4
+
+- Add MASH tools for message reads, attachment listing, attachment reads, and forward draft creation.
+- Add script actions for attachment inspection, capped attachment reads, and forward draft creation.
+- Document required Mailbridge automation-token permissions for attachments and forwarding.
+
 ## 0.1.3
 
 - Add calendar script action validation and runner execution.

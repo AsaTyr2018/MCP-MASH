@@ -40,6 +40,7 @@ Public internet exposure is not recommended yet.
 - Real `move` execution through Mailbridge `move_messages`.
 - Contact and calendar list/search/create helpers through Mailbridge.
 - Calendar script actions for fixed events and mail-derived delivery windows.
+- Message read, attachment list/read, and forward-draft helpers through Mailbridge.
 - Weekly report script generator.
 - Placeholder tools for future report/send/query-preview work.
 
@@ -140,6 +141,10 @@ Example setup flow:
 - `configure_mailbridge`
 - `get_mailbridge_config`
 - `test_mailbridge_connection`
+- `get_message`
+- `list_attachments`
+- `get_attachment`
+- `create_forward_draft`
 - `list_contacts`
 - `search_contacts`
 - `create_contact`
@@ -196,6 +201,9 @@ Current real execution support:
 - `move` through Mailbridge `move_messages`
 - `create_calendar_event` and aliases `calendar_event`, `calendar_create`, `create_event`
 - `calendar_from_delivery` and `create_calendar_events_from_mail` for mail-derived delivery events
+- `list_attachments`
+- `read_attachment`
+- `create_forward_draft`, `forward_draft`, and `forward`
 
 Current planned/placeholder actions:
 
@@ -249,6 +257,8 @@ contacts
 contacts_write
 calendar
 calendar_write
+attachments
+forward
 ```
 
 Mailbridge still owns provider credentials, writable sync profiles, account scoping, and audit.

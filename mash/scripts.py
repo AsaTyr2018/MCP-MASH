@@ -29,6 +29,11 @@ KNOWN_ACTIONS = {
     "create_event",
     "calendar_from_delivery",
     "create_calendar_events_from_mail",
+    "list_attachments",
+    "read_attachment",
+    "create_forward_draft",
+    "forward_draft",
+    "forward",
 }
 CALENDAR_ACTIONS = {
     "create_calendar_event",
@@ -101,6 +106,8 @@ def validate_script_content(content: str) -> dict[str, Any]:
                 errors.append(f"action {index} has unknown type '{action_type}'")
             if action_type == "move" and not str(action.get("folder", "")).strip():
                 errors.append(f"action {index} move requires folder")
+            if action_type in {"create_forward_draft", "forward_draft", "forward"} and not str(action.get("to") or action.get("to_recipients") or "").strip():
+                errors.append(f"action {index} {action_type} requires to or to_recipients")
             if action_type in CALENDAR_ACTIONS:
                 target_account = str(action.get("target_account") or action.get("calendar_account") or "").strip()
                 if not target_account:

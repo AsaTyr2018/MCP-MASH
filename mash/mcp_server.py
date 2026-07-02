@@ -36,8 +36,23 @@ mcp = FastMCP(
     ),
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(
-        allowed_hosts=list(settings.allowed_hosts),
-        allowed_origins=list(settings.allowed_origins),
+        allowed_hosts=[
+            "127.0.0.1",
+            "127.0.0.1:8080",
+            "127.0.0.1:18083",
+            "localhost",
+            "localhost:8080",
+            "localhost:18083",
+            "192.168.1.172",
+            "192.168.1.172:18083",
+        ],
+        allowed_origins=[
+            "http://127.0.0.1:8080",
+            "http://127.0.0.1:18083",
+            "http://localhost:8080",
+            "http://localhost:18083",
+            "http://192.168.1.172:18083",
+        ],
     ),
 )
 
@@ -151,6 +166,53 @@ def search_contacts(account: str, query: str, limit: int = 20) -> dict[str, Any]
     """Search synced contacts for an allowed Mailbridge account."""
     client, account_id = _mailbridge_client_and_account(account)
     return client.search_contacts(account_id, query=query, limit=max(1, min(limit, 100)))
+
+
+@mcp.tool()
+def get_message(account: str, message_id: int) -> dict[str, Any]:
+    """Read one message through Mailbridge for an allowed account."""
+    client, account_id = _mailbridge_client_and_account(account)
+    message = client.get_message(message_id)
+    if int(message.get("account_id", 0)) != int(account_id):
+        raise ValueError("message does not belong to requested account")
+    return message
+
+
+@mcp.tool()
+def list_attachments(account: str, message_id: int) -> dict[str, Any]:
+    """List attachments for one message through Mailbridge without content."""
+    client, account_id = _mailbridge_client_and_account(account)
+    result = client.list_attachments(message_id)
+    if int(result.get("account_id", 0)) != int(account_id):
+        raise ValueError("message does not belong to requested account")
+    return result
+
+
+@mcp.tool()
+def get_attachment(account: str, message_id: int, attachment_index: int = 0, filename: str = "", max_bytes: int = 1000000) -> dict[str, Any]:
+    """Read one message attachment as base64 content through Mailbridge."""
+    client, account_id = _mailbridge_client_and_account(account)
+    result = client.get_attachment(message_id, attachment_index=attachment_index, filename=filename, max_bytes=max(1, min(max_bytes, 5000000)))
+    if int(result.get("account_id", 0)) != int(account_id):
+        raise ValueError("message does not belong to requested account")
+    return result
+
+
+@mcp.tool()
+def create_forward_draft(
+    account: str,
+    message_id: int,
+    to_recipients: str,
+    note: str = "",
+    cc_recipients: str = "",
+    bcc_recipients: str = "",
+) -> dict[str, Any]:
+    """Create a forward draft for one message. Sending remains Mailbridge-policy controlled."""
+    client, account_id = _mailbridge_client_and_account(account)
+    message = client.get_message(message_id)
+    if int(message.get("account_id", 0)) != int(account_id):
+        raise ValueError("message does not belong to requested account")
+    return client.create_forward_draft(message_id, to_recipients, note=note, cc_recipients=cc_recipients, bcc_recipients=bcc_recipients)
 
 
 @mcp.tool()

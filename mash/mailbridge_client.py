@@ -86,6 +86,25 @@ class MailbridgeClient:
         raw = self.call("search_mail", {"account_id": account_id, "query": query, "limit": limit})
         return _coerce_records(raw)
 
+    def get_message(self, message_id: int) -> dict[str, Any]:
+        return _coerce_object(self.call("get_message", {"message_id": message_id}))
+
+    def list_attachments(self, message_id: int) -> dict[str, Any]:
+        return _coerce_object(self.call("list_attachments", {"message_id": message_id}))
+
+    def get_attachment(self, message_id: int, attachment_index: int = 0, filename: str = "", max_bytes: int = 1_000_000) -> dict[str, Any]:
+        return _coerce_object(
+            self.call(
+                "get_attachment",
+                {
+                    "message_id": message_id,
+                    "attachment_index": attachment_index,
+                    "filename": filename,
+                    "max_bytes": max_bytes,
+                },
+            )
+        )
+
     def move_messages(self, account_id: int, message_ids: list[int], target_folder: str, source_folder: str = "") -> Any:
         return self.call(
             "move_messages",
@@ -119,6 +138,27 @@ class MailbridgeClient:
         if profile_id is not None:
             args["profile_id"] = profile_id
         return _coerce_object(self.call("create_contact", args))
+
+    def create_forward_draft(
+        self,
+        message_id: int,
+        to_recipients: str,
+        note: str = "",
+        cc_recipients: str = "",
+        bcc_recipients: str = "",
+    ) -> dict[str, Any]:
+        return _coerce_object(
+            self.call(
+                "create_forward_draft",
+                {
+                    "message_id": message_id,
+                    "to_recipients": to_recipients,
+                    "note": note,
+                    "cc_recipients": cc_recipients,
+                    "bcc_recipients": bcc_recipients,
+                },
+            )
+        )
 
     def list_calendar_events(self, account_id: int, start_at: str, end_at: str, limit: int = 50) -> dict[str, Any]:
         return _coerce_object(
