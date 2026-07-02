@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Add wired script actions for read/unread, trash, add-label, remove-label, draft-reply, and send-reply.
+- Add concrete dry-run previews for reply and mail mutation actions.
+- Wait for Mailbridge background sync jobs when `sync_before_run` is enabled.
+- Keep Mailbridge responsive while MASH waits for sync completion.
+
 ## 0.1.7
 
 - Change report rendering from mail-content summaries to MASH job overview reports.

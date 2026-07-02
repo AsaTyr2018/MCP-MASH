@@ -39,6 +39,8 @@ Public internet exposure is not recommended yet.
 - Script validation gate: real script execution requires a successful dry run and explicit user OK.
 - Account alias support, for example `botmail -> main`.
 - Real `move` execution through Mailbridge `move_messages`.
+- Read/unread, trash, add-label, remove-label, draft-reply, and send-reply actions through Mailbridge.
+- `sync_before_run` waits for Mailbridge background sync jobs before searching.
 - Contact and calendar list/search/create helpers through Mailbridge.
 - Calendar script actions for fixed events and mail-derived delivery windows.
 - Message read, attachment list/read, forward-draft helpers, and attachment-forwarding script actions through Mailbridge.
@@ -47,7 +49,7 @@ Public internet exposure is not recommended yet.
 - Weekly MASH job overview report generator.
 - Report dry-runs with job status, processed counts, and run-log highlights.
 - Report draft/send support through Mailbridge policy, including `send_account` and `automation_consent_id`.
-- Placeholder tools for future reply/send actions.
+- Reply draft/send actions through Mailbridge policy.
 
 ## Non-Goals
 
@@ -269,7 +271,7 @@ Current planned/placeholder actions:
 - `add_label`
 - `remove_label`
 
-Placeholder actions are logged as coming soon until their Mailbridge adapter mapping exists.
+`mark_read`, `mark_unread`, `trash`, `add_label`, `remove_label`, `draft_reply`, and `send_reply` are wired through the Mailbridge adapter.
 
 ## Mailbridge Adapter
 
@@ -279,6 +281,8 @@ Use `configure_mailbridge` to set:
 - `mailbridge_mcp_token`
 - `sync_before_run`
 - optional `account_aliases`
+
+When `sync_before_run` is enabled, MASH waits for Mailbridge background sync jobs to finish before searching the local index. Mailbridge stays responsive while the job runs.
 
 Example alias:
 

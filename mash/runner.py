@@ -4,6 +4,7 @@ import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
+from email.utils import parseaddr
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -84,6 +85,9 @@ FORWARD_ATTACHMENT_ACTIONS = {
 }
 FORWARD_ACTIONS = FORWARD_DRAFT_ACTIONS | FORWARD_ATTACHMENT_ACTIONS
 REPORT_ACTIONS = {"send_report"}
+MAIL_FLAG_ACTIONS = {"mark_read", "mark_unread"}
+LABEL_ACTIONS = {"add_label", "remove_label"}
+REPLY_ACTIONS = {"draft_reply", "send_reply"}
 
 
 def _resolve_account_id(mailbridge: MailbridgeClient, account_name: str) -> int:
@@ -104,6 +108,35 @@ def _render_template(template: str, message: dict[str, Any]) -> str:
         return template.format(**values)
     except Exception:
         return template
+
+
+def _message_ids(matches: list[dict[str, Any]]) -> list[int]:
+    return [int(item["id"]) for item in matches if item.get("id")]
+
+
+def _label_name(action: dict[str, Any]) -> str:
+    return str(action.get("label") or action.get("folder") or action.get("target_folder") or "").strip()
+
+
+def _reply_recipient(message: dict[str, Any]) -> str:
+    sender = str(message.get("sender") or "").strip()
+    _, address = parseaddr(sender)
+    return address or sender
+
+
+def _reply_subject(message: dict[str, Any], action: dict[str, Any]) -> str:
+    subject_template = str(action.get("subject") or "").strip()
+    if subject_template:
+        return _render_template(subject_template, message)
+    subject = str(message.get("subject") or "").strip()
+    return subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+
+def _reply_body(message: dict[str, Any], action: dict[str, Any]) -> str:
+    body_template = str(action.get("body") or action.get("body_text") or action.get("reply") or "").strip()
+    if body_template:
+        return _render_template(body_template, message)
+    return ""
 
 
 def _attachment_extensions(action: dict[str, Any]) -> list[str]:
@@ -596,6 +629,48 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     details={key: value for key, value in action.items() if key != "body"},
                 )
                 continue
+            if dry_run and mailbridge and action_type in MAIL_FLAG_ACTIONS | {"trash"} | LABEL_ACTIONS:
+                _write_log(
+                    log_path,
+                    "info",
+                    "would_execute_action",
+                    index=index,
+                    action_type=action_type,
+                    account=account_name,
+                    account_id=account_id,
+                    query=query,
+                    matched=matched_count,
+                    message_ids=_message_ids(matches)[:50],
+                    label=_label_name(action),
+                    target_folder=str(action.get("folder") or action.get("trash_folder") or action.get("target_folder") or ""),
+                    details={key: value for key, value in action.items() if key != "body"},
+                )
+                continue
+            if dry_run and mailbridge and action_type in REPLY_ACTIONS:
+                previews = []
+                for message in matches[:20]:
+                    previews.append(
+                        {
+                            "message_id": int(message["id"]),
+                            "to": _reply_recipient(message),
+                            "subject": _reply_subject(message, action),
+                            "body_preview": _reply_body(message, action)[:500],
+                        }
+                    )
+                _write_log(
+                    log_path,
+                    "info",
+                    "would_create_reply_drafts",
+                    index=index,
+                    action_type=action_type,
+                    account=account_name,
+                    account_id=account_id,
+                    matched=matched_count,
+                    send_requested=action_type == "send_reply",
+                    automation_consent_id=action.get("automation_consent_id"),
+                    previews=previews,
+                )
+                continue
             if dry_run or not mailbridge:
                 event = "would_execute_action" if dry_run else "action_coming_soon"
                 if not dry_run:
@@ -625,6 +700,94 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     source_folder=str(action.get("source_folder", "")),
                 )
                 _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, result=str(result)[:2000])
+            elif action_type in MAIL_FLAG_ACTIONS:
+                message_ids = _message_ids(matches)
+                if not message_ids:
+                    skipped_count += 1
+                    _write_log(log_path, "info", "action_skipped", index=index, action_type=action_type, reason="no matching messages")
+                    continue
+                result = mailbridge.mark_messages(
+                    account_id,
+                    message_ids,
+                    read=action_type == "mark_read",
+                    source_folder=str(action.get("source_folder", "")),
+                )
+                _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, result=str(result)[:2000])
+            elif action_type == "trash":
+                message_ids = _message_ids(matches)
+                if not message_ids:
+                    skipped_count += 1
+                    _write_log(log_path, "info", "action_skipped", index=index, action_type=action_type, reason="no matching messages")
+                    continue
+                result = mailbridge.trash_messages(
+                    account_id,
+                    message_ids,
+                    trash_folder=str(action.get("trash_folder") or action.get("folder") or action.get("target_folder") or "Trash"),
+                    source_folder=str(action.get("source_folder", "")),
+                )
+                _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, result=str(result)[:2000])
+            elif action_type == "add_label":
+                label = _label_name(action)
+                message_ids = _message_ids(matches)
+                if not message_ids:
+                    skipped_count += 1
+                    _write_log(log_path, "info", "action_skipped", index=index, action_type=action_type, reason="no matching messages")
+                    continue
+                result = mailbridge.add_label_to_messages(
+                    account_id,
+                    message_ids,
+                    label,
+                    source_folder=str(action.get("source_folder", "")),
+                )
+                _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, label=label, result=str(result)[:2000])
+            elif action_type == "remove_label":
+                label = _label_name(action)
+                message_ids = _message_ids(matches)
+                if not message_ids:
+                    skipped_count += 1
+                    _write_log(log_path, "info", "action_skipped", index=index, action_type=action_type, reason="no matching messages")
+                    continue
+                result = mailbridge.remove_label_from_messages(account_id, message_ids, label)
+                _write_log(log_path, "info", "action_executed", index=index, action_type=action_type, label=label, result=str(result)[:2000])
+            elif action_type in REPLY_ACTIONS:
+                drafts = []
+                sent = []
+                skipped = 0
+                for message in matches:
+                    recipient = _reply_recipient(message)
+                    if not recipient:
+                        skipped += 1
+                        continue
+                    draft = mailbridge.create_draft(
+                        account_id,
+                        recipient,
+                        _reply_subject(message, action),
+                        _reply_body(message, action),
+                        cc_recipients=str(action.get("cc") or action.get("cc_recipients") or ""),
+                        bcc_recipients=str(action.get("bcc") or action.get("bcc_recipients") or ""),
+                        in_reply_to_message_id=int(message["id"]),
+                    )
+                    drafts.append(draft)
+                    if action_type == "send_reply":
+                        consent = action.get("automation_consent_id")
+                        sent.append(
+                            mailbridge.send_draft(
+                                int(draft["id"]),
+                                automation_consent_id=int(consent) if consent not in {None, ""} else None,
+                            )
+                        )
+                skipped_count += skipped
+                _write_log(
+                    log_path,
+                    "info",
+                    "reply_drafts_created" if action_type == "draft_reply" else "reply_drafts_sent",
+                    index=index,
+                    action_type=action_type,
+                    created=len(drafts),
+                    sent=len(sent),
+                    skipped=skipped,
+                    result=str({"drafts": drafts[:5], "sent": sent[:5]})[:2000],
+                )
             elif action_type in REPORT_ACTIONS:
                 recipient = _resolve_report_recipient(action)
                 report_account_name, report_account_id = _resolve_report_account(mailbridge, action, account_name, account_id)

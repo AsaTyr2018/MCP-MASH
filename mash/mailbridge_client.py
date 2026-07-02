@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import threading
+import time
 from typing import Any, Coroutine
 
 from mcp import ClientSession
@@ -80,7 +81,20 @@ class MailbridgeClient:
         raise ValueError(f"Mailbridge account '{name}' is not visible to this MASH token")
 
     def sync_account(self, account_id: int, limit: int = 100) -> Any:
-        return self.call("sync_account", {"account_id": account_id, "limit": limit})
+        result = _coerce_object(self.call("sync_account", {"account_id": account_id, "limit": limit}))
+        if "id" not in result or str(result.get("status", "")) not in {"queued", "running"}:
+            return result
+        job_id = int(result["id"])
+        deadline = time.monotonic() + 180
+        while time.monotonic() < deadline:
+            job = self.get_sync_job(job_id)
+            if str(job.get("status")) in {"done", "failed", "cancelled"}:
+                return job
+            time.sleep(2)
+        return self.get_sync_job(job_id) | {"wait_timeout": True}
+
+    def get_sync_job(self, job_id: int) -> dict[str, Any]:
+        return _coerce_object(self.call("get_sync_job", {"job_id": job_id}))
 
     def search_mail(self, account_id: int, query: str, limit: int = 20) -> list[dict[str, Any]]:
         raw = self.call("search_mail", {"account_id": account_id, "query": query, "limit": limit})
@@ -113,6 +127,49 @@ class MailbridgeClient:
                 "message_ids": message_ids,
                 "target_folder": target_folder,
                 "source_folder": source_folder,
+            },
+        )
+
+    def mark_messages(self, account_id: int, message_ids: list[int], read: bool = True, source_folder: str = "") -> Any:
+        return self.call(
+            "mark_messages",
+            {
+                "account_id": account_id,
+                "message_ids": message_ids,
+                "read": read,
+                "source_folder": source_folder,
+            },
+        )
+
+    def trash_messages(self, account_id: int, message_ids: list[int], trash_folder: str = "Trash", source_folder: str = "") -> Any:
+        return self.call(
+            "trash_messages",
+            {
+                "account_id": account_id,
+                "message_ids": message_ids,
+                "trash_folder": trash_folder,
+                "source_folder": source_folder,
+            },
+        )
+
+    def add_label_to_messages(self, account_id: int, message_ids: list[int], label: str, source_folder: str = "") -> Any:
+        return self.call(
+            "add_label_to_messages",
+            {
+                "account_id": account_id,
+                "message_ids": message_ids,
+                "label": label,
+                "source_folder": source_folder,
+            },
+        )
+
+    def remove_label_from_messages(self, account_id: int, message_ids: list[int], label: str) -> Any:
+        return self.call(
+            "remove_label_from_messages",
+            {
+                "account_id": account_id,
+                "message_ids": message_ids,
+                "label": label,
             },
         )
 

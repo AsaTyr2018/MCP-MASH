@@ -133,6 +133,10 @@ def validate_script_content(content: str) -> dict[str, Any]:
                 errors.append(f"action {index} has unknown type '{action_type}'")
             if action_type == "move" and not str(action.get("folder", "")).strip():
                 errors.append(f"action {index} move requires folder")
+            if action_type in {"add_label", "remove_label"} and not str(action.get("label") or action.get("folder") or action.get("target_folder") or "").strip():
+                errors.append(f"action {index} {action_type} requires label, folder, or target_folder")
+            if action_type in {"draft_reply", "send_reply"} and not str(action.get("body") or action.get("body_text") or action.get("reply") or "").strip():
+                errors.append(f"action {index} {action_type} requires body, body_text, or reply")
             if action_type in FORWARD_ACTIONS and not str(action.get("to") or action.get("to_recipients") or "").strip():
                 errors.append(f"action {index} {action_type} requires to or to_recipients")
             if action_type in CALENDAR_ACTIONS:
