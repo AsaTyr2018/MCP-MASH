@@ -47,6 +47,11 @@ def migrate() -> None:
             )
             """
         )
+        _ensure_column(conn, "scripts", "validated", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "scripts", "validated_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "scripts", "validated_by", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "scripts", "validation_run_id", "INTEGER")
+        _ensure_column(conn, "scripts", "validation_note", "TEXT NOT NULL DEFAULT ''")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS runs (
@@ -66,6 +71,12 @@ def migrate() -> None:
             )
             """
         )
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def get_config(key: str, default: str = "") -> str:

@@ -156,6 +156,18 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
     matched_count = 0
     try:
         _write_log(log_path, "info", "run_started", run_id=run_id, script_id=script_id, dry_run=dry_run, reason=reason)
+        if not dry_run and not bool(script.get("validated")):
+            status = "blocked"
+            error_message = "script is not validated; run a dry run, show the result to the user, then call approve_script_validation with user_ok=true"
+            _write_log(
+                log_path,
+                "warning",
+                "script_not_validated",
+                message=error_message,
+                validation_required=True,
+            )
+            _write_log(log_path, "info", "run_finished", status=status, matched_count=matched_count, action_count=action_count, skipped_count=skipped_count)
+            return _finish_run(run_id, started, status, matched_count, action_count, skipped_count, error_message)
         mailbridge = MailbridgeClient(runtime_config.snapshot())
         if not mailbridge.configured():
             _write_log(

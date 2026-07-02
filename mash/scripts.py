@@ -127,33 +127,64 @@ def script_path(script_id: str) -> Path:
     return settings.scripts_dir / f"{script_id}.yaml"
 
 
-def save_script(content: str) -> dict[str, Any]:
+def save_script(content: str, *, invalidate_validation: bool = True) -> dict[str, Any]:
     data = validate_script_content(content)
     script_id = str(data["id"])
     path = script_path(script_id)
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     with db() as conn:
-        conn.execute(
-            """
-            INSERT INTO scripts (id, name, enabled, schedule, account, path, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(id) DO UPDATE SET
-                name = excluded.name,
-                enabled = excluded.enabled,
-                schedule = excluded.schedule,
-                account = excluded.account,
-                path = excluded.path,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                script_id,
-                str(data.get("name", "")).strip(),
-                int(bool(data.get("enabled", False))),
-                str(data.get("schedule", "")).strip(),
-                str(data.get("account", "")).strip(),
-                str(path),
-            ),
-        )
+        if invalidate_validation:
+            conn.execute(
+                """
+                INSERT INTO scripts (
+                    id, name, enabled, schedule, account, path, updated_at,
+                    validated, validated_at, validated_by, validation_run_id, validation_note
+                )
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 0, '', '', NULL, '')
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    enabled = excluded.enabled,
+                    schedule = excluded.schedule,
+                    account = excluded.account,
+                    path = excluded.path,
+                    updated_at = CURRENT_TIMESTAMP,
+                    validated = 0,
+                    validated_at = '',
+                    validated_by = '',
+                    validation_run_id = NULL,
+                    validation_note = ''
+                """,
+                (
+                    script_id,
+                    str(data.get("name", "")).strip(),
+                    int(bool(data.get("enabled", False))),
+                    str(data.get("schedule", "")).strip(),
+                    str(data.get("account", "")).strip(),
+                    str(path),
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO scripts (id, name, enabled, schedule, account, path, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    enabled = excluded.enabled,
+                    schedule = excluded.schedule,
+                    account = excluded.account,
+                    path = excluded.path,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    script_id,
+                    str(data.get("name", "")).strip(),
+                    int(bool(data.get("enabled", False))),
+                    str(data.get("schedule", "")).strip(),
+                    str(data.get("account", "")).strip(),
+                    str(path),
+                ),
+            )
     return get_script(script_id)
 
 
@@ -164,6 +195,7 @@ def get_script(script_id: str) -> dict[str, Any]:
         raise ValueError("script not found")
     result = dict(row)
     result["enabled"] = bool(result["enabled"])
+    result["validated"] = bool(result.get("validated", False))
     result["content"] = Path(result["path"]).read_text(encoding="utf-8")
     return result
 
@@ -175,6 +207,7 @@ def list_scripts() -> list[dict[str, Any]]:
     for row in rows:
         item = dict(row)
         item["enabled"] = bool(item["enabled"])
+        item["validated"] = bool(item.get("validated", False))
         result.append(item)
     return result
 
@@ -183,7 +216,55 @@ def set_script_enabled(script_id: str, enabled: bool) -> dict[str, Any]:
     script = get_script(script_id)
     data = parse_script(script["content"])
     data["enabled"] = bool(enabled)
-    return save_script(yaml.safe_dump(data, sort_keys=False))
+    return save_script(yaml.safe_dump(data, sort_keys=False), invalidate_validation=False)
+
+
+def approve_script_validation(script_id: str, validation_run_id: int, *, user_ok: bool, validated_by: str = "user", note: str = "") -> dict[str, Any]:
+    if not user_ok:
+        raise ValueError("user_ok must be true after explicit user approval")
+    get_script(script_id)
+    with db() as conn:
+        run = conn.execute(
+            "SELECT * FROM runs WHERE id = ? AND script_id = ?",
+            (int(validation_run_id), script_id),
+        ).fetchone()
+        if not run:
+            raise ValueError("validation run not found for script")
+        if not bool(run["dry_run"]) or str(run["status"]) != "ok":
+            raise ValueError("validation run must be a successful dry run")
+        conn.execute(
+            """
+            UPDATE scripts
+            SET validated = 1,
+                validated_at = CURRENT_TIMESTAMP,
+                validated_by = ?,
+                validation_run_id = ?,
+                validation_note = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (validated_by.strip() or "user", int(validation_run_id), note.strip(), script_id),
+        )
+    return get_script(script_id)
+
+
+def revoke_script_validation(script_id: str, note: str = "") -> dict[str, Any]:
+    get_script(script_id)
+    with db() as conn:
+        conn.execute(
+            """
+            UPDATE scripts
+            SET validated = 0,
+                validated_at = '',
+                validated_by = '',
+                validation_run_id = NULL,
+                validation_note = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (note.strip(), script_id),
+        )
+    return get_script(script_id)
 
 
 def delete_script(script_id: str) -> dict[str, Any]:

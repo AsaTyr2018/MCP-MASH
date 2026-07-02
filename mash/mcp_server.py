@@ -20,6 +20,8 @@ from .scripts import (
     list_scripts as read_scripts,
     save_script,
     set_allowed_accounts as write_allowed_accounts,
+    approve_script_validation as approve_validation,
+    revoke_script_validation as revoke_validation,
     set_script_enabled,
     validate_script_content,
     allowed_accounts as read_allowed_accounts,
@@ -71,6 +73,7 @@ def get_status() -> dict[str, Any]:
         "allowed_accounts": read_allowed_accounts(),
         "script_count": len(scripts),
         "enabled_script_count": len([script for script in scripts if script["enabled"]]),
+        "validated_script_count": len([script for script in scripts if script.get("validated")]),
         "scheduler": scheduler.status(),
         "mailbridge": {
             "configured": bool(runtime_config.snapshot().mailbridge_mcp_url and runtime_config.snapshot().mailbridge_mcp_token),
@@ -288,11 +291,23 @@ def get_script(script_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def update_script(script_id: str, content_yaml: str) -> dict[str, Any]:
-    """Replace one script. The YAML id must match the requested script_id."""
+    """Replace one script and reset its validation. The YAML id must match the requested script_id."""
     data = validate_script_content(content_yaml)
     if str(data["id"]) != script_id:
         raise ValueError("content id does not match script_id")
     return save_script(content_yaml)
+
+
+@mcp.tool()
+def approve_script_validation(script_id: str, validation_run_id: int, user_ok: bool, validated_by: str = "user", note: str = "") -> dict[str, Any]:
+    """Mark a script as validated after a successful dry run and explicit user OK."""
+    return approve_validation(script_id, validation_run_id, user_ok=user_ok, validated_by=validated_by, note=note)
+
+
+@mcp.tool()
+def revoke_script_validation(script_id: str, note: str = "") -> dict[str, Any]:
+    """Remove script validation so non-dry-run execution is blocked again."""
+    return revoke_validation(script_id, note=note)
 
 
 @mcp.tool()

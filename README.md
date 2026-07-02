@@ -36,6 +36,7 @@ Public internet exposure is not recommended yet.
 - Structured JSONL run logs.
 - Runtime-polling configuration, so Mailbridge adapter changes do not require a restart.
 - Mailbridge MCP adapter with personal automation-token support.
+- Script validation gate: real script execution requires a successful dry run and explicit user OK.
 - Account alias support, for example `botmail -> main`.
 - Real `move` execution through Mailbridge `move_messages`.
 - Contact and calendar list/search/create helpers through Mailbridge.
@@ -130,7 +131,25 @@ Example setup flow:
 2. Configure MASH with `configure_mailbridge`.
 3. Initialize MASH with `initialize_mash`.
 4. Create scripts with `create_script` or helper tools such as `create_weekly_report`.
-5. Test with `run_script_now` and inspect logs with `get_run_log`.
+5. Test with `run_script_now(..., dry_run=true)` and inspect logs with `get_run_log`.
+6. Show the dry-run result to the user and ask for explicit OK.
+7. Call `approve_script_validation` with `user_ok=true` and the successful dry-run ID.
+8. Enable or run the script for real.
+
+## Script Validation Gate
+
+Every real script execution is blocked until the script is validated.
+
+Required flow:
+
+1. Create or update the script.
+2. Run a dry run.
+3. Review the run result with the user.
+4. After explicit user OK, call `approve_script_validation`.
+
+Any later script content update resets validation. `enable_script` and `disable_script` keep the validation state because they do not change script behavior.
+
+This keeps interactive AI work approval-based while allowing validated MASH scripts to run autonomously inside their Mailbridge token and account scope.
 
 ## MCP Tools
 
@@ -155,6 +174,8 @@ Example setup flow:
 - `list_scripts`
 - `get_script`
 - `update_script`
+- `approve_script_validation`
+- `revoke_script_validation`
 - `enable_script`
 - `disable_script`
 - `delete_script`

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Add script validation gate for all non-dry-run execution.
+- Add `approve_script_validation` and `revoke_script_validation` MCP tools.
+- Reset validation on script content updates while preserving it on enable/disable changes.
+
 ## 0.1.4
 
 - Add MASH tools for message reads, attachment listing, attachment reads, and forward draft creation.
