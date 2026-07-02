@@ -41,9 +41,11 @@ Public internet exposure is not recommended yet.
 - Real `move` execution through Mailbridge `move_messages`.
 - Contact and calendar list/search/create helpers through Mailbridge.
 - Calendar script actions for fixed events and mail-derived delivery windows.
-- Message read, attachment list/read, and forward-draft helpers through Mailbridge.
+- Message read, attachment list/read, forward-draft helpers, and attachment-forwarding script actions through Mailbridge.
+- Real mail query previews through `test_mail_query`.
+- Dry-run logs for attachment forwarding include selected message IDs, subjects, senders, and attachment filenames.
 - Weekly report script generator.
-- Placeholder tools for future report/send/query-preview work.
+- Placeholder tools for future report/send work.
 
 ## Non-Goals
 
@@ -133,7 +135,7 @@ Example setup flow:
 4. Create scripts with `create_script` or helper tools such as `create_weekly_report`.
 5. Test with `run_script_now(..., dry_run=true)` and inspect logs with `get_run_log`.
 6. Show the dry-run result to the user and ask for explicit OK.
-7. Call `approve_script_validation` with `user_ok=true` and the successful dry-run ID.
+7. Call `approve_script_validation` or the shorter alias `approve_validation` with `user_ok=true` and the successful dry-run ID.
 8. Enable or run the script for real.
 
 ## Script Validation Gate
@@ -145,7 +147,7 @@ Required flow:
 1. Create or update the script.
 2. Run a dry run.
 3. Review the run result with the user.
-4. After explicit user OK, call `approve_script_validation`.
+4. After explicit user OK, call `approve_script_validation` or `approve_validation`.
 
 Any later script content update resets validation. `enable_script` and `disable_script` keep the validation state because they do not change script behavior.
 
@@ -175,6 +177,7 @@ This keeps interactive AI work approval-based while allowing validated MASH scri
 - `get_script`
 - `update_script`
 - `approve_script_validation`
+- `approve_validation`
 - `revoke_script_validation`
 - `enable_script`
 - `disable_script`
@@ -224,7 +227,18 @@ Current real execution support:
 - `calendar_from_delivery` and `create_calendar_events_from_mail` for mail-derived delivery events
 - `list_attachments`
 - `read_attachment`
-- `create_forward_draft`, `forward_draft`, and `forward`
+- `create_forward_draft`, `forward_draft`, `forward`, `forward_mail`, `forward_email`, `forward_to`, `forward_message`, and `document_forward`
+- `forward_attachments`, `forward_pdf`, `send_attachments`, `extract_attachments`, `forward_message_with_attachments`, and `forward_matching_attachments`
+
+Attachment-forwarding actions support:
+
+- `to` or `to_recipients`
+- `cc` / `bcc`
+- `subject`, with templates such as `{subject}`
+- `attachment_extensions`, for example `.pdf`
+- `dedupe: true` to keep only one selected attachment per filename
+
+In dry runs, MASH does not create drafts. It inspects matching messages and writes a `would_forward_attachments` log entry with the selected attachment filenames. After the dry-run result is shown to the user and approved, `approve_script_validation` allows the script to create real Mailbridge forward drafts with copied attachments.
 
 Current planned/placeholder actions:
 
@@ -258,6 +272,36 @@ Example alias:
 ```
 
 This lets scripts use `botmail` while Mailbridge exposes the account as `main`.
+
+## Example: Forward Invoice PDFs
+
+```yaml
+id: forward-invoice-pdfs
+name: Forward invoice PDFs
+enabled: false
+schedule: "*/10 * * * *"
+account: Hauke Lenz
+query: "in:inbox has:attachment (rechnung OR invoice OR receipt OR beleg)"
+on_no_matches: sleep
+limits:
+  max_messages: 10
+actions:
+  - type: forward_attachments
+    to: documents@example.com
+    attachment_extensions:
+      - .pdf
+    subject: "Fwd: {subject}"
+    dedupe: true
+logging:
+  level: detailed
+```
+
+Validation flow:
+
+1. `run_script_now` with `dry_run=true`
+2. `get_run_log` and show the selected attachments to the user
+3. `approve_script_validation` or `approve_validation` with `user_ok=true`
+4. enable the script or run it for real
 
 MASH polls runtime config internally. Updating Mailbridge adapter settings through MCP does not require restarting the container.
 

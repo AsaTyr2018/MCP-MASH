@@ -64,7 +64,25 @@ CALENDAR_ACTIONS = {
     "calendar_from_delivery",
     "create_calendar_events_from_mail",
 }
-FORWARD_ACTIONS = {"create_forward_draft", "forward_draft", "forward"}
+FORWARD_DRAFT_ACTIONS = {
+    "create_forward_draft",
+    "forward_draft",
+    "forward",
+    "forward_mail",
+    "forward_email",
+    "forward_to",
+    "forward_message",
+    "document_forward",
+}
+FORWARD_ATTACHMENT_ACTIONS = {
+    "forward_attachments",
+    "forward_pdf",
+    "send_attachments",
+    "extract_attachments",
+    "forward_message_with_attachments",
+    "forward_matching_attachments",
+}
+FORWARD_ACTIONS = FORWARD_DRAFT_ACTIONS | FORWARD_ATTACHMENT_ACTIONS
 
 
 def _resolve_account_id(mailbridge: MailbridgeClient, account_name: str) -> int:
@@ -85,6 +103,49 @@ def _render_template(template: str, message: dict[str, Any]) -> str:
         return template.format(**values)
     except Exception:
         return template
+
+
+def _attachment_extensions(action: dict[str, Any]) -> list[str]:
+    raw = action.get("attachment_extensions")
+    if raw is None and str(action.get("type", "")) == "forward_pdf":
+        raw = [".pdf"]
+    if raw is None:
+        raw = action.get("extensions")
+    if isinstance(raw, str):
+        items = [item.strip() for item in raw.split(",")]
+    elif isinstance(raw, list):
+        items = [str(item).strip() for item in raw]
+    else:
+        items = []
+    return [item.lower() if item.startswith(".") else f".{item.lower()}" for item in items if item]
+
+
+def _matching_attachments(attachments_result: dict[str, Any], extensions: list[str]) -> list[dict[str, Any]]:
+    attachments = attachments_result.get("attachments")
+    if not isinstance(attachments, list):
+        return []
+    if not extensions:
+        return [item for item in attachments if isinstance(item, dict)]
+    matches = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        filename = str(item.get("filename") or "").lower()
+        if any(filename.endswith(extension) for extension in extensions):
+            matches.append(item)
+    return matches
+
+
+def _dedupe_attachments(attachments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    result = []
+    for item in attachments:
+        key = str(item.get("filename") or item.get("index") or "").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(item)
+    return result
 
 
 def _parse_delivery_window(message: dict[str, Any]) -> tuple[str, str] | None:
@@ -211,6 +272,44 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
         for index, action in enumerate(actions):
             action_type = str(action.get("type", ""))
             action_count += 1
+            if dry_run and mailbridge and action_type in FORWARD_ATTACHMENT_ACTIONS:
+                selected_messages = []
+                skipped = 0
+                selected_total = 0
+                for message in matches:
+                    attachment_result = mailbridge.list_attachments(int(message["id"]))
+                    matching = _matching_attachments(attachment_result, _attachment_extensions(action))
+                    if bool(action.get("dedupe")):
+                        matching = _dedupe_attachments(matching)
+                    if not matching:
+                        skipped += 1
+                    filenames = [str(item.get("filename") or f"attachment-{item.get('index')}") for item in matching]
+                    selected_total += len(filenames)
+                    selected_messages.append(
+                        {
+                            "message_id": int(message["id"]),
+                            "subject": str(message.get("subject") or ""),
+                            "sender": str(message.get("sender") or ""),
+                            "selected_attachments": filenames,
+                        }
+                    )
+                skipped_count += skipped
+                _write_log(
+                    log_path,
+                    "info",
+                    "would_forward_attachments",
+                    index=index,
+                    action_type=action_type,
+                    account=account_name,
+                    query=query,
+                    matched=matched_count,
+                    selected_attachment_count=selected_total,
+                    skipped=skipped,
+                    to=str(action.get("to_recipients") or action.get("to") or ""),
+                    selected_messages=selected_messages[:20],
+                    details={key: value for key, value in action.items() if key != "body"},
+                )
+                continue
             if dry_run or not mailbridge:
                 event = "would_execute_action" if dry_run else "action_coming_soon"
                 if not dry_run:
@@ -314,17 +413,49 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                 note = str(action.get("note") or "")
                 cc_recipients = str(action.get("cc_recipients") or action.get("cc") or "")
                 bcc_recipients = str(action.get("bcc_recipients") or action.get("bcc") or "")
+                subject_template = str(action.get("subject") or "")
                 drafts = []
+                skipped = 0
+                inspected_attachments = 0
                 for message in matches:
+                    attachment_note = ""
+                    attachment_indices: list[int] = []
+                    attachment_filenames: list[str] = []
+                    include_attachments = False
+                    if action_type in FORWARD_ATTACHMENT_ACTIONS:
+                        attachment_result = mailbridge.list_attachments(int(message["id"]))
+                        matching = _matching_attachments(attachment_result, _attachment_extensions(action))
+                        if bool(action.get("dedupe")):
+                            matching = _dedupe_attachments(matching)
+                        inspected_attachments += len(matching)
+                        if not matching:
+                            skipped += 1
+                            continue
+                        filenames = [str(item.get("filename") or f"attachment-{item.get('index')}") for item in matching]
+                        attachment_indices = [int(item["index"]) for item in matching if item.get("index") is not None]
+                        attachment_filenames = filenames
+                        include_attachments = True
+                        attachment_note = "Matched attachments: " + ", ".join(filenames)
+                    rendered_note = _render_template(note, message) if note else ""
+                    rendered_subject = ""
+                    if subject_template:
+                        rendered_subject = _render_template(subject_template, message)
+                    if attachment_note:
+                        rendered_note = (rendered_note + "\n\n" if rendered_note else "") + attachment_note
                     drafts.append(
                         mailbridge.create_forward_draft(
                             int(message["id"]),
                             to_recipients,
-                            note=note,
+                            note=rendered_note,
                             cc_recipients=cc_recipients,
                             bcc_recipients=bcc_recipients,
+                            subject=rendered_subject,
+                            attachment_indices=attachment_indices,
+                            attachment_filenames=attachment_filenames,
+                            include_attachments=include_attachments,
                         )
                     )
+                skipped_count += skipped
                 _write_log(
                     log_path,
                     "info",
@@ -332,6 +463,14 @@ def run_script(script_id: str, *, dry_run: bool = False, reason: str = "manual")
                     index=index,
                     action_type=action_type,
                     created=len(drafts),
+                    skipped=skipped,
+                    attachment_passthrough=action_type in FORWARD_ATTACHMENT_ACTIONS,
+                    matched_attachments=inspected_attachments,
+                    message=(
+                        "Forward drafts were created with matching attachments copied into the draft."
+                        if action_type in FORWARD_ATTACHMENT_ACTIONS
+                        else "Forward drafts were created."
+                    ),
                     result=str(drafts[:5])[:2000],
                 )
             else:

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.6
+
+- Add real `test_mail_query` execution through Mailbridge.
+- Add `forward_attachments`, `forward_pdf`, and related forward aliases to script validation and execution.
+- Forward matching attachments into Mailbridge drafts using `attachment_extensions`, `subject`, and `dedupe`.
+- Add dry-run attachment previews with selected message and filename details in run logs.
+- Add `approve_validation` alias and expose approval tools early in the MCP tool list for clients with truncated discovery.
+
 ## 0.1.5
 
 - Add script validation gate for all non-dry-run execution.

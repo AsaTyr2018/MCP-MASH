@@ -34,6 +34,17 @@ KNOWN_ACTIONS = {
     "create_forward_draft",
     "forward_draft",
     "forward",
+    "forward_mail",
+    "forward_email",
+    "forward_to",
+    "forward_message",
+    "document_forward",
+    "forward_attachments",
+    "forward_pdf",
+    "send_attachments",
+    "extract_attachments",
+    "forward_message_with_attachments",
+    "forward_matching_attachments",
 }
 CALENDAR_ACTIONS = {
     "create_calendar_event",
@@ -42,6 +53,22 @@ CALENDAR_ACTIONS = {
     "create_event",
     "calendar_from_delivery",
     "create_calendar_events_from_mail",
+}
+FORWARD_ACTIONS = {
+    "create_forward_draft",
+    "forward_draft",
+    "forward",
+    "forward_mail",
+    "forward_email",
+    "forward_to",
+    "forward_message",
+    "document_forward",
+    "forward_attachments",
+    "forward_pdf",
+    "send_attachments",
+    "extract_attachments",
+    "forward_message_with_attachments",
+    "forward_matching_attachments",
 }
 
 
@@ -106,7 +133,7 @@ def validate_script_content(content: str) -> dict[str, Any]:
                 errors.append(f"action {index} has unknown type '{action_type}'")
             if action_type == "move" and not str(action.get("folder", "")).strip():
                 errors.append(f"action {index} move requires folder")
-            if action_type in {"create_forward_draft", "forward_draft", "forward"} and not str(action.get("to") or action.get("to_recipients") or "").strip():
+            if action_type in FORWARD_ACTIONS and not str(action.get("to") or action.get("to_recipients") or "").strip():
                 errors.append(f"action {index} {action_type} requires to or to_recipients")
             if action_type in CALENDAR_ACTIONS:
                 target_account = str(action.get("target_account") or action.get("calendar_account") or "").strip()

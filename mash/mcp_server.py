@@ -20,7 +20,7 @@ from .scripts import (
     list_scripts as read_scripts,
     save_script,
     set_allowed_accounts as write_allowed_accounts,
-    approve_script_validation as approve_validation,
+    approve_script_validation as approve_validation_backend,
     revoke_script_validation as revoke_validation,
     set_script_enabled,
     validate_script_content,
@@ -38,23 +38,8 @@ mcp = FastMCP(
     ),
     streamable_http_path="/",
     transport_security=TransportSecuritySettings(
-        allowed_hosts=[
-            "127.0.0.1",
-            "127.0.0.1:8080",
-            "127.0.0.1:18083",
-            "localhost",
-            "localhost:8080",
-            "localhost:18083",
-            "192.168.1.172",
-            "192.168.1.172:18083",
-        ],
-        allowed_origins=[
-            "http://127.0.0.1:8080",
-            "http://127.0.0.1:18083",
-            "http://localhost:8080",
-            "http://localhost:18083",
-            "http://192.168.1.172:18083",
-        ],
+        allowed_hosts=list(settings.allowed_hosts),
+        allowed_origins=list(settings.allowed_origins),
     ),
 )
 
@@ -83,6 +68,18 @@ def get_status() -> dict[str, Any]:
         },
         "recent_runs": runs,
     }
+
+
+@mcp.tool()
+def approve_script_validation(script_id: str, validation_run_id: int, user_ok: bool, validated_by: str = "user", note: str = "") -> dict[str, Any]:
+    """Mark a MASH script as validated only after Codex showed the dry-run result to the user and the user explicitly answered OK."""
+    return approve_validation_backend(script_id, validation_run_id, user_ok=user_ok, validated_by=validated_by, note=note)
+
+
+@mcp.tool()
+def approve_validation(script_id: str, validation_run_id: int, user_ok: bool, validated_by: str = "user", note: str = "") -> dict[str, Any]:
+    """Short alias for approve_script_validation for clients that hide long tool names."""
+    return approve_validation_backend(script_id, validation_run_id, user_ok=user_ok, validated_by=validated_by, note=note)
 
 
 @mcp.tool()
@@ -209,13 +206,27 @@ def create_forward_draft(
     note: str = "",
     cc_recipients: str = "",
     bcc_recipients: str = "",
+    subject: str = "",
+    attachment_indices: list[int] | None = None,
+    attachment_filenames: list[str] | None = None,
+    include_attachments: bool = False,
 ) -> dict[str, Any]:
-    """Create a forward draft for one message. Sending remains Mailbridge-policy controlled."""
+    """Create a forward draft for one message, optionally copying selected original attachments into the draft."""
     client, account_id = _mailbridge_client_and_account(account)
     message = client.get_message(message_id)
     if int(message.get("account_id", 0)) != int(account_id):
         raise ValueError("message does not belong to requested account")
-    return client.create_forward_draft(message_id, to_recipients, note=note, cc_recipients=cc_recipients, bcc_recipients=bcc_recipients)
+    return client.create_forward_draft(
+        message_id,
+        to_recipients,
+        note=note,
+        cc_recipients=cc_recipients,
+        bcc_recipients=bcc_recipients,
+        subject=subject,
+        attachment_indices=attachment_indices or [],
+        attachment_filenames=attachment_filenames or [],
+        include_attachments=include_attachments,
+    )
 
 
 @mcp.tool()
@@ -296,12 +307,6 @@ def update_script(script_id: str, content_yaml: str) -> dict[str, Any]:
     if str(data["id"]) != script_id:
         raise ValueError("content id does not match script_id")
     return save_script(content_yaml)
-
-
-@mcp.tool()
-def approve_script_validation(script_id: str, validation_run_id: int, user_ok: bool, validated_by: str = "user", note: str = "") -> dict[str, Any]:
-    """Mark a script as validated after a successful dry run and explicit user OK."""
-    return approve_validation(script_id, validation_run_id, user_ok=user_ok, validated_by=validated_by, note=note)
 
 
 @mcp.tool()
@@ -408,13 +413,18 @@ def preview_script(script_id: str) -> dict[str, Any]:
 
 @mcp.tool()
 def test_mail_query(account: str, query: str, limit: int = 20) -> dict[str, Any]:
-    """Placeholder for future Mailbridge query testing."""
+    """Run a Mailbridge search for an allowed account without changing mail state."""
+    safe_limit = max(1, min(limit, 200))
+    client, account_id = _mailbridge_client_and_account(account)
+    messages = client.search_mail(account_id, query, limit=safe_limit)
     return {
-        "status": "coming_soon",
+        "status": "ok",
         "account": account,
+        "account_id": account_id,
         "query": query,
-        "limit": max(1, min(limit, 200)),
-        "message": "Mailbridge query execution is not wired in this basic build.",
+        "limit": safe_limit,
+        "matched": len(messages),
+        "messages": messages,
     }
 
 

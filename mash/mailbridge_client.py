@@ -146,6 +146,10 @@ class MailbridgeClient:
         note: str = "",
         cc_recipients: str = "",
         bcc_recipients: str = "",
+        subject: str = "",
+        attachment_indices: list[int] | None = None,
+        attachment_filenames: list[str] | None = None,
+        include_attachments: bool = False,
     ) -> dict[str, Any]:
         return _coerce_object(
             self.call(
@@ -156,6 +160,10 @@ class MailbridgeClient:
                     "note": note,
                     "cc_recipients": cc_recipients,
                     "bcc_recipients": bcc_recipients,
+                    "subject": subject,
+                    "attachment_indices": attachment_indices or [],
+                    "attachment_filenames": attachment_filenames or [],
+                    "include_attachments": include_attachments,
                 },
             )
         )
