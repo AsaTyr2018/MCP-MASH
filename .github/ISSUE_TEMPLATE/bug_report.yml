@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a reproducible MCP-MASH problem
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not paste bearer tokens, Mailbridge automation tokens, private mail bodies, generated private scripts, run logs with personal data, or database dumps.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What went wrong?
+      placeholder: A scheduled script fails when...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - MCP server/tools
+        - Script validation
+        - Scheduler
+        - Run logging
+        - Mailbridge adapter
+        - Docker/deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic script data where possible.
+      placeholder: |
+        1. Initialize MASH with...
+        2. Create script...
+        3. Run...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      placeholder: v0.1.0 or commit SHA
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Deployment details without secrets.
+      placeholder: |
+        Docker Compose / OS:
+        MASH endpoint mode: localhost or LAN:
+        Mailbridge version:
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact tokens, private mail data, and personal information.
+      render: text
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed or redacted credentials, tokens, private mail data, scripts with personal data, and run logs with personal data.
+          required: true
+        - label: I searched existing issues before opening this one.
+          required: true

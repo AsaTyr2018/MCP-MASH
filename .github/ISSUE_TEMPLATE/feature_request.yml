@@ -1,0 +1,65 @@
+name: Feature request
+description: Suggest an improvement for MCP-MASH
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for script language, scheduler, MCP tool, Mailbridge adapter, logging, or deployment improvements.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or limitation should this solve?
+      placeholder: I want MASH to...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - MCP tools
+        - Script format/actions
+        - Scheduler
+        - Mailbridge adapter
+        - Reports
+        - Run logs/status
+        - Security/token handling
+        - Docker/deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security impact
+      description: Does this read, send, move, delete, log, or retain more mail data?
+      placeholder: |
+        Data touched:
+        Retention impact:
+        Token/policy impact:
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: This request does not include secrets, tokens, private mail data, generated private scripts, or private run logs.
+          required: true
+        - label: I checked whether this is already covered by an existing issue.
+          required: true

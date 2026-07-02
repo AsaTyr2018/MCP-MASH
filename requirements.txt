@@ -1,0 +1,5 @@
+fastapi==0.124.2
+uvicorn[standard]==0.38.0
+mcp==1.28.1
+PyYAML==6.0.3
+croniter==6.0.0
