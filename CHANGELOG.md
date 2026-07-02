@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2
+
+- Add MASH MCP tools for listing, searching, and creating contacts through Mailbridge.
+- Add MASH MCP tools for listing and creating calendar events through Mailbridge.
+- Document required Mailbridge automation-token permissions for contacts and calendar.
+
 ## 0.1.1
 
 - Treat empty Mailbridge search results as a successful no-op instead of a runner error.

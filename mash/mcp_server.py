@@ -130,6 +130,75 @@ def test_mailbridge_connection() -> dict[str, Any]:
     }
 
 
+def _mailbridge_client_and_account(account: str) -> tuple[MailbridgeClient, int]:
+    if account not in read_allowed_accounts():
+        raise ValueError(f"account '{account}' is not in the MASH allowlist")
+    client = MailbridgeClient(runtime_config.snapshot())
+    config_snapshot = runtime_config.snapshot()
+    mailbridge_account_name = (config_snapshot.account_aliases or {}).get(account, account)
+    return client, client.account_id_by_name(mailbridge_account_name)
+
+
+@mcp.tool()
+def list_contacts(account: str, limit: int = 50) -> dict[str, Any]:
+    """List synced contacts for an allowed Mailbridge account."""
+    client, account_id = _mailbridge_client_and_account(account)
+    return client.search_contacts(account_id, query="", limit=max(1, min(limit, 100)))
+
+
+@mcp.tool()
+def search_contacts(account: str, query: str, limit: int = 20) -> dict[str, Any]:
+    """Search synced contacts for an allowed Mailbridge account."""
+    client, account_id = _mailbridge_client_and_account(account)
+    return client.search_contacts(account_id, query=query, limit=max(1, min(limit, 100)))
+
+
+@mcp.tool()
+def create_contact(
+    account: str,
+    display_name: str,
+    email: str,
+    phone: str = "",
+    company: str = "",
+    profile_id: int | None = None,
+) -> dict[str, Any]:
+    """Create a contact for an allowed Mailbridge account through Mailbridge policy."""
+    client, account_id = _mailbridge_client_and_account(account)
+    return client.create_contact(account_id, display_name, email, phone=phone, company=company, profile_id=profile_id)
+
+
+@mcp.tool()
+def list_calendar_events(account: str, start_at: str, end_at: str, limit: int = 50) -> dict[str, Any]:
+    """List synced calendar events for an allowed Mailbridge account."""
+    client, account_id = _mailbridge_client_and_account(account)
+    return client.list_calendar_events(account_id, start_at=start_at, end_at=end_at, limit=max(1, min(limit, 200)))
+
+
+@mcp.tool()
+def create_calendar_event(
+    account: str,
+    title: str,
+    starts_at: str,
+    ends_at: str = "",
+    location: str = "",
+    description: str = "",
+    attendees: str = "",
+    profile_id: int | None = None,
+) -> dict[str, Any]:
+    """Create a calendar event for an allowed Mailbridge account through Mailbridge policy."""
+    client, account_id = _mailbridge_client_and_account(account)
+    return client.create_calendar_event(
+        account_id,
+        title,
+        starts_at,
+        ends_at=ends_at,
+        location=location,
+        description=description,
+        attendees=attendees,
+        profile_id=profile_id,
+    )
+
+
 @mcp.tool()
 def validate_script(content_yaml: str) -> dict[str, Any]:
     """Validate a MASH YAML script without saving it."""

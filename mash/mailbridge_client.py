@@ -97,6 +97,66 @@ class MailbridgeClient:
             },
         )
 
+    def search_contacts(self, account_id: int, query: str = "", limit: int = 20) -> dict[str, Any]:
+        return _coerce_object(self.call("search_contacts", {"account_id": account_id, "query": query, "limit": limit}))
+
+    def create_contact(
+        self,
+        account_id: int,
+        display_name: str,
+        email: str,
+        phone: str = "",
+        company: str = "",
+        profile_id: int | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {
+            "account_id": account_id,
+            "display_name": display_name,
+            "email": email,
+            "phone": phone,
+            "company": company,
+        }
+        if profile_id is not None:
+            args["profile_id"] = profile_id
+        return _coerce_object(self.call("create_contact", args))
+
+    def list_calendar_events(self, account_id: int, start_at: str, end_at: str, limit: int = 50) -> dict[str, Any]:
+        return _coerce_object(
+            self.call(
+                "list_calendar_events",
+                {
+                    "account_id": account_id,
+                    "start_at": start_at,
+                    "end_at": end_at,
+                    "limit": limit,
+                },
+            )
+        )
+
+    def create_calendar_event(
+        self,
+        account_id: int,
+        title: str,
+        starts_at: str,
+        ends_at: str = "",
+        location: str = "",
+        description: str = "",
+        attendees: str = "",
+        profile_id: int | None = None,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {
+            "account_id": account_id,
+            "title": title,
+            "starts_at": starts_at,
+            "ends_at": ends_at,
+            "location": location,
+            "description": description,
+            "attendees": attendees,
+        }
+        if profile_id is not None:
+            args["profile_id"] = profile_id
+        return _coerce_object(self.call("create_calendar_event", args))
+
 
 def _coerce_records(raw: Any) -> list[dict[str, Any]]:
     if raw is None or raw == "":
@@ -125,3 +185,15 @@ def _coerce_records(raw: Any) -> list[dict[str, Any]]:
         if isinstance(item, dict):
             result.append(item)
     return result
+
+
+def _coerce_object(raw: Any) -> dict[str, Any]:
+    if raw is None or raw == "":
+        return {}
+    if isinstance(raw, str):
+        parsed = json.loads(raw)
+    else:
+        parsed = raw
+    if isinstance(parsed, dict):
+        return parsed
+    return {"result": parsed}

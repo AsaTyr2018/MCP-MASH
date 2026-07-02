@@ -38,6 +38,7 @@ Public internet exposure is not recommended yet.
 - Mailbridge MCP adapter with personal automation-token support.
 - Account alias support, for example `botmail -> main`.
 - Real `move` execution through Mailbridge `move_messages`.
+- Contact and calendar list/search/create helpers through Mailbridge.
 - Weekly report script generator.
 - Placeholder tools for future report/send/query-preview work.
 
@@ -138,6 +139,11 @@ Example setup flow:
 - `configure_mailbridge`
 - `get_mailbridge_config`
 - `test_mailbridge_connection`
+- `list_contacts`
+- `search_contacts`
+- `create_contact`
+- `list_calendar_events`
+- `create_calendar_event`
 - `validate_script`
 - `create_script`
 - `list_scripts`
@@ -222,6 +228,27 @@ Example alias:
 This lets scripts use `botmail` while Mailbridge exposes the account as `main`.
 
 MASH polls runtime config internally. Updating Mailbridge adapter settings through MCP does not require restarting the container.
+
+## Contact And Calendar Tools
+
+MASH can delegate contact and calendar operations to Mailbridge for allowed accounts:
+
+- `list_contacts`
+- `search_contacts`
+- `create_contact`
+- `list_calendar_events`
+- `create_calendar_event`
+
+The Mailbridge automation token configured in MASH must include the matching permissions:
+
+```text
+contacts
+contacts_write
+calendar
+calendar_write
+```
+
+Mailbridge still owns provider credentials, writable sync profiles, account scoping, and audit.
 
 ## Security Notes
 
